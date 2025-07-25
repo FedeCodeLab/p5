@@ -8,9 +8,7 @@ import { Hero } from "@/components/hero";
 
 export default function Home() {
   return (
-    <div className="relative">
-      <AnimatedBackground />
-
+    <div className="my-8">
       <div className="font-sans mx-auto w-[85%] border-2 border-[#707070] relative z-50">
         <main className="mx-auto p-4 flex flex-col gap-4">
           <Navbar />
