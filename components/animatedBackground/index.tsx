@@ -8,7 +8,7 @@ declare global {
   }
 }
 
-export default function AnimatedBackground() {
+export function AnimatedBackground() {
   const sketchRef = useRef<HTMLDivElement>(null);
   const p5InstanceRef = useRef<any>(null);
 
@@ -23,14 +23,26 @@ export default function AnimatedBackground() {
         const sketch = (p: any) => {
           let time = 0;
           const dots: any[] = [];
-          const gridSize = 15;
+          let gridSize = 25; // Aumentado para menos puntos
           let cols: number;
           let rows: number;
+          let frameCount = 0;
 
           p.setup = () => {
             p.createCanvas(p.windowWidth, p.windowHeight);
-            cols = Math.ceil(p.width / gridSize) + 10;
-            rows = Math.ceil(p.height / gridSize) + 10;
+            p.frameRate(30); // Reducir FPS para mejor rendimiento
+
+            // Ajustar gridSize basado en el tamaño de pantalla
+            if (p.width < 768) {
+              gridSize = 35; // Móviles: muchos menos puntos
+            } else if (p.width < 1200) {
+              gridSize = 30; // Tablets: menos puntos
+            } else {
+              gridSize = 25; // Desktop: puntos normales
+            }
+
+            cols = Math.ceil(p.width / gridSize) + 3; // Reducido buffer
+            rows = Math.ceil(p.height / gridSize) + 3;
 
             // Initialize dots grid
             for (let x = 0; x < cols; x++) {
@@ -41,117 +53,156 @@ export default function AnimatedBackground() {
                   y: y * gridSize,
                   alpha: 0,
                   size: 0,
+                  lastAlpha: 0,
                 };
               }
             }
           };
 
           p.draw = () => {
+            frameCount++;
+
+            // Skip frames on mobile for better performance
+            if (p.width < 768 && frameCount % 2 === 0) {
+              return;
+            }
+
             // Background color #141414
             p.background(20, 20, 20);
 
-            // Calculate wave parameters
-            const waveSpeed = 0.08;
-            const waveFrequency = 0.008;
-            const waveAmplitude = 8;
+            // Pre-calculate wave parameters
+            const waveSpeed = 0.06; // Slightly slower
+            const waveFrequency = 0.01; // Reduced frequency
+            const waveAmplitude = 6; // Reduced amplitude
+            const timeOffset = time * waveSpeed;
+            const maxMouseInfluence = 80; // Smaller influence area
 
-            // Update and draw dots
+            // Calculate screen diagonal once
+            const screenDiagonal = p.dist(0, 0, p.width, p.height);
+
+            // Batch processing - only update visible dots
+            const visibleDots = [];
             for (let x = 0; x < cols; x++) {
               for (let y = 0; y < rows; y++) {
                 const dot = dots[x][y];
 
-                // Calculate distance from bottom-right corner
-                const distanceFromCorner = p.dist(
-                  dot.x,
-                  dot.y,
-                  p.width,
-                  p.height
-                );
+                // Skip dots that are far off screen
+                if (
+                  dot.x < -gridSize * 2 ||
+                  dot.x > p.width + gridSize * 2 ||
+                  dot.y < -gridSize * 2 ||
+                  dot.y > p.height + gridSize * 2
+                ) {
+                  continue;
+                }
 
-                // Create wave effect moving from bottom-right to top-left
-                const waveOffset =
-                  (dot.x + dot.y) * waveFrequency - time * waveSpeed;
-                const wave1 = p.sin(waveOffset) * waveAmplitude;
-                const wave2 =
-                  p.sin(waveOffset * 1.5 + time * 0.04) * waveAmplitude * 0.5;
-                const wave3 =
-                  p.sin(waveOffset * 0.7 + time * 0.06) * waveAmplitude * 0.3;
+                visibleDots.push({ dot, x, y });
+              }
+            }
 
-                const combinedWave = wave1 + wave2 + wave3;
+            // Process visible dots
+            for (const { dot } of visibleDots) {
+              // Calculate distance from bottom-right corner (cached)
+              const distanceFromCorner = p.dist(
+                dot.x,
+                dot.y,
+                p.width,
+                p.height
+              );
 
-                // Calculate alpha based on wave and distance
-                const baseAlpha = p.map(
-                  combinedWave,
-                  -waveAmplitude * 2,
-                  waveAmplitude * 2,
-                  0,
-                  255
-                );
+              // Simplified wave effect (only one wave)
+              const waveOffset = (dot.x + dot.y) * waveFrequency - timeOffset;
+              const wave = p.sin(waveOffset) * waveAmplitude;
 
-                // Add distance-based fading (closer to bottom-right = more visible)
-                const distanceFactor = p.map(
-                  distanceFromCorner,
-                  0,
-                  p.dist(0, 0, p.width, p.height),
-                  1,
-                  0.1
-                );
+              // Calculate alpha based on wave and distance
+              const baseAlpha = p.map(
+                wave,
+                -waveAmplitude,
+                waveAmplitude,
+                0,
+                180
+              ); // Reduced max alpha
 
-                // Create trailing effect
-                const trailOffset = (dot.x + dot.y) * 0.005 - time * 0.12;
-                const trailFactor = p.map(p.sin(trailOffset), -1, 1, 0.3, 1);
+              // Distance-based fading (optimized)
+              const distanceFactor = p.map(
+                distanceFromCorner,
+                0,
+                screenDiagonal,
+                0.8,
+                0.1
+              );
 
-                dot.alpha = p.constrain(
-                  baseAlpha * distanceFactor * trailFactor,
-                  0,
-                  255
-                );
+              // Simplified trailing effect
+              const trailOffset = (dot.x + dot.y) * 0.003 - time * 0.08;
+              const trailFactor = p.map(p.sin(trailOffset), -1, 1, 0.5, 1);
 
-                // Size variation based on alpha
-                dot.size = p.map(dot.alpha, 0, 255, 0.5, 4);
+              const finalAlpha = baseAlpha * distanceFactor * trailFactor;
 
-                // Draw dot if visible
-                if (dot.alpha > 5) {
-                  p.fill(255, dot.alpha);
-                  p.noStroke();
-                  p.ellipse(dot.x, dot.y, dot.size);
+              // Smooth alpha transitions
+              dot.alpha = p.lerp(
+                dot.lastAlpha,
+                p.constrain(finalAlpha, 0, 255),
+                0.1
+              );
+              dot.lastAlpha = dot.alpha;
 
-                  // Add subtle glow for brighter dots
-                  if (dot.alpha > 150) {
-                    p.fill(255, dot.alpha * 0.3);
-                    p.ellipse(dot.x, dot.y, dot.size * 2);
-                  }
+              // Size variation (simplified)
+              dot.size = p.map(dot.alpha, 0, 255, 1, 3);
+
+              // Draw dot if visible (higher threshold)
+              if (dot.alpha > 15) {
+                p.fill(255, dot.alpha);
+                p.noStroke();
+                p.ellipse(dot.x, dot.y, dot.size);
+
+                // Simplified glow (only for very bright dots)
+                if (dot.alpha > 180) {
+                  p.fill(255, dot.alpha * 0.15);
+                  p.ellipse(dot.x, dot.y, dot.size * 1.5);
                 }
               }
             }
 
-            // Add some floating particles for extra movement
-            p.fill(255, 100);
-            p.noStroke();
-            for (let i = 0; i < 20; i++) {
-              const particleX =
-                p.width - ((time * 2 + i * 50) % (p.width + 100));
-              const particleY =
-                p.height - ((time * 1.2 + i * 30) % (p.height + 100));
-              const particleAlpha = p.map(
-                p.sin(time * 0.04 + i),
-                -1,
-                1,
-                50,
-                150
-              );
+            // Reduced floating particles (only on desktop)
+            if (p.width >= 768) {
+              p.fill(255, 60);
+              p.noStroke();
+              for (let i = 0; i < 5; i++) {
+                // Reduced from 10 to 5
+                const particleX =
+                  p.width - ((time * 1.2 + i * 80) % (p.width + 100));
+                const particleY =
+                  p.height - ((time * 0.8 + i * 60) % (p.height + 100));
+                const particleAlpha = p.map(
+                  p.sin(time * 0.02 + i),
+                  -1,
+                  1,
+                  30,
+                  100
+                );
 
-              p.fill(255, particleAlpha);
-              p.ellipse(particleX, particleY, 2);
+                p.fill(255, particleAlpha);
+                p.ellipse(particleX, particleY, 1.2);
+              }
             }
 
-            time++;
+            time += 0.8; // Slower time increment
           };
 
           p.windowResized = () => {
             p.resizeCanvas(p.windowWidth, p.windowHeight);
-            cols = Math.ceil(p.width / gridSize) + 10;
-            rows = Math.ceil(p.height / gridSize) + 10;
+
+            // Adjust grid size based on screen size
+            if (p.width < 768) {
+              gridSize = 35;
+            } else if (p.width < 1200) {
+              gridSize = 30;
+            } else {
+              gridSize = 25;
+            }
+
+            cols = Math.ceil(p.width / gridSize) + 3;
+            rows = Math.ceil(p.height / gridSize) + 3;
 
             // Reinitialize dots grid
             dots.length = 0;
@@ -163,6 +214,7 @@ export default function AnimatedBackground() {
                   y: y * gridSize,
                   alpha: 0,
                   size: 0,
+                  lastAlpha: 0,
                 };
               }
             }
@@ -190,10 +242,9 @@ export default function AnimatedBackground() {
 
   return (
     <div
-      className="fixed z-10 w-full h-screen overflow-hidden"
+      ref={sketchRef}
+      className="fixed inset-0 w-full h-full z-0"
       style={{ backgroundColor: "#141414" }}
-    >
-      <div ref={sketchRef} className="absolute inset-0" />
-    </div>
+    />
   );
 }
